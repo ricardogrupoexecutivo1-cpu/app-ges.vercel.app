@@ -26,7 +26,6 @@ export default function FinanceHomePage() {
       setEmail(data.session.user.email ?? "");
       const r = await getMyRole("GRUPO EXECUTIVO SERVICE");
       setRole(r);
-
       setLoading(false);
     })();
   }, []);
