@@ -5,14 +5,13 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 /**
- * IMPORTANTÍSSIMO:
- * - Não cria client se faltar env (evita quebrar build/SSR na Vercel)
+ * Não quebra build/SSR: se faltar env, não cria o client.
  */
 export const supabase: SupabaseClient | null =
   supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 /**
- * Use isso quando você quer obrigar o Supabase e ter erro claro.
+ * Use quando quiser obrigar env e receber um erro claro.
  */
 export function supabaseOrThrow(): SupabaseClient {
   if (!supabase) {
