@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -31,14 +31,12 @@ export default function ARByClientPage() {
   const allowed = role === "admin" || role === "finance";
 
   useEffect(() => {
-    // Se Supabase não estiver configurado, não quebra build
     if (!supabase) {
       setLoading(false);
       return;
     }
 
     (async () => {
-      // sessão / login
       const { data } = await supabase.auth.getSession();
       if (!data.session?.user) {
         window.location.href = "/login";
@@ -47,11 +45,9 @@ export default function ARByClientPage() {
 
       setEmail(data.session.user.email ?? "");
 
-      // papel
       const r = await getMyRole(companyName);
       setRole(r);
 
-      // clientes
       const { data: cData, error: cErr } = await supabase
         .from("clients")
         .select("id,name")
