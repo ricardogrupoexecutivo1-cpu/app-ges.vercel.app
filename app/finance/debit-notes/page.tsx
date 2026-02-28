@@ -151,13 +151,9 @@ export default function DebitNotesPage() {
       </p>
 
       <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Link
-          href="/finance"
-          style={{ textDecoration: "none", padding: 10, border: "1px solid #000", borderRadius: 10 }}
-        >
+        <Link href="/finance" style={{ textDecoration: "none", padding: 10, border: "1px solid #000", borderRadius: 10 }}>
           Voltar
         </Link>
-
         <Link
           href="/finance/ar-by-client"
           style={{ textDecoration: "none", padding: 10, border: "1px solid #000", borderRadius: 10 }}
@@ -294,3 +290,4 @@ export default function DebitNotesPage() {
     </div>
   );
 }
+
