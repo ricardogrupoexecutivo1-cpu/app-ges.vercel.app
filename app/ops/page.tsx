@@ -1,49 +1,84 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { getMyRole } from "@/lib/rbac";
+import { getMyRole, AppRole } from "@/lib/rbac";
 
-export default function OpsPage() {
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<string>("");
-  const [msg, setMsg] = useState<string>("");
+export default function OpsHomePage() {
+  const companyName = "GRUPO EXECUTIVO SERVICE";
+  const [email, setEmail] = useState<string>("");
+  const [role, setRole] = useState<AppRole | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+
     (async () => {
       const { data } = await supabase.auth.getSession();
-      setEmail(data.session?.user?.email ?? "");
-      const r = await getMyRole();
-      setRole(r ?? "sem papel");
+      if (!data.session?.user) {
+        window.location.href = "/login";
+        return;
+      }
+
+      setEmail(data.session.user.email ?? "");
+      const r = await getMyRole(companyName);
+      setRole(r);
+      setLoading(false);
     })();
   }, []);
+
+  if (!supabase) {
+    return (
+      <div style={{ padding: 20 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Operação</h1>
+        <p style={{ color: "crimson", fontWeight: 600, marginTop: 10 }}>
+          Supabase não configurado.
+        </p>
+        <p style={{ marginTop: 6 }}>
+          Configure <b>NEXT_PUBLIC_SUPABASE_URL</b> e{" "}
+          <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> na Vercel e faça Redeploy.
+        </p>
+      </div>
+    );
+  }
+
+  const allowed = role === "admin" || role === "ops";
 
   return (
     <div style={{ padding: 20 }}>
       <h1 style={{ fontSize: 22, fontWeight: 700 }}>Operação</h1>
-      <p style={{ marginTop: 8 }}>Usuário: <b>{email || "não logado"}</b></p>
-      <p style={{ marginTop: 6 }}>Papel: <b>{role}</b></p>
 
-      <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
+      <p style={{ marginTop: 8 }}>
+        Usuário: <b>{email || "carregando..."}</b> • Papel:{" "}
+        <b>{role || "carregando..."}</b>
+      </p>
+
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <Link href="/app" style={{ textDecoration: "none", padding: 10, border: "1px solid #000", borderRadius: 10 }}>
           Voltar
         </Link>
       </div>
 
-      <div style={{ marginTop: 18, padding: 12, border: "1px solid #ccc", borderRadius: 10 }}>
-        <p><b>Operacional</b> pode lançar:</p>
-        <ul>
-          <li>OS / Viagens</li>
-          <li>Despesas com comprovante</li>
-          <li>Adiantamentos</li>
-        </ul>
-        <p style={{ marginTop: 8, opacity: 0.85 }}>
-          Próximo passo: vamos criar tela de “Nova OS” e “Nova Viagem”.
-        </p>
-      </div>
-
-      {msg && <p style={{ marginTop: 12 }}>{msg}</p>}
+      {!allowed ? (
+        <div style={{ marginTop: 18, padding: 12, border: "1px solid #f00", borderRadius: 10 }}>
+          <b>ACESSO NEGADO.</b>
+          <p style={{ marginTop: 8 }}>Somente admin/ops pode acessar a operação.</p>
+        </div>
+      ) : loading ? (
+        <p style={{ marginTop: 16 }}>Carregando…</p>
+      ) : (
+        <div style={{ marginTop: 18, padding: 12, border: "1px solid #ccc", borderRadius: 10 }}>
+          <p><b>Operação</b> (ops) pode lançar dados operacionais.</p>
+          <p style={{ marginTop: 8, opacity: 0.85 }}>
+            * Financeiro fica bloqueado para perfil operacional.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
+
