@@ -2,67 +2,74 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase, supabaseOrThrow } from "@/lib/supabase";
-import { getMyRole, AppRole } from "@/lib/rbac";
+import { supabase } from "@/lib/supabase";
+import { getMyRole, type AppRole } from "@/lib/rbac";
 
 export default function AppHome() {
   const [email, setEmail] = useState<string>("");
   const [role, setRole] = useState<AppRole | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Se Supabase não estiver configurado, não quebra build/SSR
-    if (!supabase) return;
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
 
-    // sessão inicial
-    supabase.auth.getSession().then(({ data }) => {
-      setEmail(data.session?.user?.email ?? "");
-    });
-
-    // mudanças de auth
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setEmail(session?.user?.email ?? "");
-      if (session?.user) {
-        const r = await getMyRole();
-        setRole(r);
-      } else {
-        setRole(null);
-      }
-    });
-
-    // carrega papel ao abrir (se já houver sessão)
     (async () => {
-      try {
-        const r = await getMyRole();
-        setRole(r);
-      } catch {
-        // se não tiver sessão/role, ignore
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+
+      if (!user) {
+        setEmail("");
         setRole(null);
+        setLoading(false);
+        return;
       }
+
+      setEmail(user.email ?? "");
+      const r = await getMyRole("GRUPO EXECUTIVO SERVICE");
+      setRole(r);
+      setLoading(false);
     })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        const user = session?.user;
+        setEmail(user?.email ?? "");
+        if (user) {
+          const r = await getMyRole("GRUPO EXECUTIVO SERVICE");
+          setRole(r);
+        } else {
+          setRole(null);
+        }
+      }
+    );
 
     return () => sub.subscription.unsubscribe();
   }, []);
 
   async function signOut() {
-    // Aqui a gente exige supabase, com erro claro se estiver faltando env
-    const sb = supabaseOrThrow();
-    await sb.auth.signOut();
-    window.location.href = "/login";
+    try {
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+    } catch {}
+
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {}
+
+    window.location.replace("/login");
   }
 
   return (
     <div style={{ padding: 20 }}>
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>ERP-GES</h1>
 
-      {!supabase ? (
-        <div style={{ marginTop: 12 }}>
-          <p style={{ color: "crimson", fontWeight: 600 }}>
-            Supabase não configurado.
-          </p>
-          <p style={{ marginTop: 6, opacity: 0.9 }}>
-            Configure <b>NEXT_PUBLIC_SUPABASE_URL</b> e <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> na Vercel e faça Redeploy.
-          </p>
-        </div>
+      {loading ? (
+        <p style={{ marginTop: 10 }}>Carregando…</p>
       ) : (
         <>
           <p style={{ marginTop: 10 }}>
@@ -78,7 +85,7 @@ export default function AppHome() {
             </p>
           ) : (
             <>
-              <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
                 <Link
                   href="/ops"
                   style={{
@@ -115,10 +122,6 @@ export default function AppHome() {
                   Sair
                 </button>
               </div>
-
-              <p style={{ marginTop: 14, opacity: 0.8 }}>
-                * Se você for <b>ops</b>, a rota Financeiro vai bloquear.
-              </p>
             </>
           )}
         </>
