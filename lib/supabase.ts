@@ -11,7 +11,7 @@ export const supabase: SupabaseClient | null =
   supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 /**
- * Use quando quiser obrigar env e receber um erro claro.
+ * Use quando quiser obrigar env e receber erro claro.
  */
 export function supabaseOrThrow(): SupabaseClient {
   if (!supabase) {
