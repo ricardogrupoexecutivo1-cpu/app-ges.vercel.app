@@ -1,23 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
-import { getMyRole, type AppRole } from "@/lib/rbac";
+
+type AppRole = "admin" | "finance" | "ops";
+
+const VERSION = "GES-APP-STABLE-2026-03-01-02";
 
 export default function AppHome() {
   const [email, setEmail] = useState<string>("");
   const [role, setRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
+  const [errMsg, setErrMsg] = useState<string>("");
 
-  useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErrMsg("");
 
-    (async () => {
-      const { data } = await supabase.auth.getSession();
+    try {
+      const supaMod = await import("@/lib/supabase");
+      const rbacMod = await import("@/lib/rbac");
+
+      const supabase = supaMod.supabase;
+
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+
       const user = data.session?.user;
 
       if (!user) {
@@ -28,32 +36,68 @@ export default function AppHome() {
       }
 
       setEmail(user.email ?? "");
-      const r = await getMyRole("GRUPO EXECUTIVO SERVICE");
-      setRole(r);
+
+      try {
+        const r = await rbacMod.getMyRole();
+        setRole(r as AppRole);
+      } catch (e) {
+        console.error("Erro ao buscar role:", e);
+        setRole(null);
+        setErrMsg("Não consegui carregar seu papel.");
+      }
+
       setLoading(false);
+    } catch (e) {
+      console.error("Erro ao carregar app:", e);
+      setEmail("");
+      setRole(null);
+      setErrMsg("Erro ao carregar sessão.");
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+
+    load();
+
+    (async () => {
+      try {
+        const supaMod = await import("@/lib/supabase");
+        const rbacMod = await import("@/lib/rbac");
+        const supabase = supaMod.supabase;
+
+        const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+          const user = session?.user;
+          setEmail(user?.email ?? "");
+
+          if (user) {
+            try {
+              const r = await rbacMod.getMyRole();
+              setRole(r as AppRole);
+            } catch {
+              setRole(null);
+            }
+          } else {
+            setRole(null);
+          }
+        });
+
+        unsub = () => sub.subscription.unsubscribe();
+      } catch {}
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        const user = session?.user;
-        setEmail(user?.email ?? "");
-        if (user) {
-          const r = await getMyRole("GRUPO EXECUTIVO SERVICE");
-          setRole(r);
-        } else {
-          setRole(null);
-        }
-      }
-    );
-
-    return () => sub.subscription.unsubscribe();
-  }, []);
+    return () => {
+      try {
+        unsub?.();
+      } catch {}
+    };
+  }, [load]);
 
   async function signOut() {
     try {
-      if (supabase) {
-        await supabase.auth.signOut();
-      }
+      const supaMod = await import("@/lib/supabase");
+      await supaMod.supabase.auth.signOut();
     } catch {}
 
     try {
@@ -67,11 +111,32 @@ export default function AppHome() {
   return (
     <div style={{ padding: 20 }}>
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>ERP-GES</h1>
+      <p style={{ marginTop: 6, opacity: 0.8 }}>
+        Versão: <b>{VERSION}</b>
+      </p>
 
       {loading ? (
         <p style={{ marginTop: 10 }}>Carregando…</p>
       ) : (
         <>
+          {errMsg && (
+            <div style={{ marginTop: 12, padding: 10, border: "1px solid #000", borderRadius: 10 }}>
+              <p style={{ margin: 0 }}>{errMsg}</p>
+              <button
+                onClick={load}
+                style={{
+                  marginTop: 10,
+                  padding: 10,
+                  border: "1px solid #000",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                }}
+              >
+                Recarregar
+              </button>
+            </div>
+          )}
+
           <p style={{ marginTop: 10 }}>
             Usuário: <b>{email || "não logado"}</b>
           </p>
@@ -84,45 +149,43 @@ export default function AppHome() {
               Abra <b>/login</b> para entrar.
             </p>
           ) : (
-            <>
-              <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-                <Link
-                  href="/ops"
-                  style={{
-                    padding: 10,
-                    border: "1px solid #000",
-                    borderRadius: 10,
-                    textDecoration: "none",
-                  }}
-                >
-                  Operação
-                </Link>
+            <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+              <Link
+                href="/ops"
+                style={{
+                  padding: 10,
+                  border: "1px solid #000",
+                  borderRadius: 10,
+                  textDecoration: "none",
+                }}
+              >
+                Operação
+              </Link>
 
-                <Link
-                  href="/finance"
-                  style={{
-                    padding: 10,
-                    border: "1px solid #000",
-                    borderRadius: 10,
-                    textDecoration: "none",
-                  }}
-                >
-                  Financeiro
-                </Link>
+              <Link
+                href="/finance"
+                style={{
+                  padding: 10,
+                  border: "1px solid #000",
+                  borderRadius: 10,
+                  textDecoration: "none",
+                }}
+              >
+                Financeiro
+              </Link>
 
-                <button
-                  onClick={signOut}
-                  style={{
-                    padding: 10,
-                    border: "1px solid #000",
-                    borderRadius: 10,
-                    cursor: "pointer",
-                  }}
-                >
-                  Sair
-                </button>
-              </div>
-            </>
+              <button
+                onClick={signOut}
+                style={{
+                  padding: 10,
+                  border: "1px solid #000",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                }}
+              >
+                Sair
+              </button>
+            </div>
           )}
         </>
       )}

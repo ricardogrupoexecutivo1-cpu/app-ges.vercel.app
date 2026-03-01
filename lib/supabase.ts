@@ -1,29 +1,36 @@
-// lib/supabase.ts
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-let _supabase: SupabaseClient | null = null;
+// Evita travamento infinito quando a internet oscila
+const fetchWithTimeout: typeof fetch = async (input, init) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10 segundos
 
-if (supabaseUrl && supabaseAnonKey) {
-  _supabase = createClient(supabaseUrl, supabaseAnonKey);
-}
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: fetchWithTimeout },
+});
 
 /**
- * Use em páginas/client-components.
- * Se faltar env, isso vira null e você pode mostrar mensagem "Supabase não configurado".
+ * Mantém compatibilidade com o resto do projeto (rbac.ts)
+ * Se as env vars estiverem faltando, lança erro claro.
  */
-export const supabase = _supabase;
-
-/**
- * Use quando você quer OBRIGAR o Supabase (e ter erro claro).
- */
-export function supabaseOrThrow(): SupabaseClient {
-  if (!_supabase) {
+export function supabaseOrThrow() {
+  if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error(
-      "Supabase env missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+      "Supabase env vars ausentes: NEXT_PUBLIC_SUPABASE_URL e/ou NEXT_PUBLIC_SUPABASE_ANON_KEY"
     );
   }
-  return _supabase;
+  return supabase;
 }

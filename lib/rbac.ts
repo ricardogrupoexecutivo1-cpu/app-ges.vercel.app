@@ -1,29 +1,33 @@
-﻿import { supabase, supabaseOrThrow } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 export type AppRole = "admin" | "finance" | "ops";
 
+/**
+ * companyName é opcional.
+ * Mantemos o parâmetro para não quebrar chamadas antigas.
+ */
 export async function getMyRole(
-  companyName = "GRUPO EXECUTIVO SERVICE"
+  _companyName?: string
 ): Promise<AppRole | null> {
-
   if (!supabase) return null;
 
-  const { data: userRes } = await supabase.auth.getUser();
-  const user = userRes.user;
-  if (!user?.id) return null;
+  // 1) Usuário logado
+  const { data: userRes, error: userError } = await supabase.auth.getUser();
+  if (userError || !userRes.user?.id) return null;
 
-  const sb = supabaseOrThrow();
+  const userId = userRes.user.id;
 
-  const { data, error } = await sb
+  // 2) Buscar role direto no profiles
+  const { data, error } = await supabase
     .from("profiles")
     .select("role")
-    .eq("user_id", user.id)
-    .eq("company_name", companyName)
+    .eq("id", userId)
     .single();
 
-  if (error) return null;
+  if (error || !data) {
+    console.error("Erro ao buscar role:", error);
+    return null;
+  }
 
-  return data?.role ?? null;
+  return data.role as AppRole;
 }
-
-
