@@ -1,43 +1,197 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+"use client";
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import styles from "./ProtectedLayout.module.css";
 
-# testing
-/coverage
+type AppRole = "admin" | "finance" | "ops";
 
-# next.js
-/.next/
-/out/
+export default function ProtectedLayout({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
 
-# production
-/build
+  const [email, setEmail] = useState<string>("");
+  const [role, setRole] = useState<AppRole | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
-# misc
-.DS_Store
-*.pem
+  const nav = useMemo(
+    () => [
+      { href: "/app", icon: "⬛", title: "Dashboard", hint: "Visão geral do negócio" },
+      { href: "/ops", icon: "⚙️", title: "Operação", hint: "Rotinas e execução" },
+      { href: "/finance", icon: "💳", title: "Financeiro", hint: "Caixa, contas, relatórios" },
+    ],
+    []
+  );
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+  useEffect(() => {
+    let alive = true;
 
-# env files (can opt-in for committing if needed)
-.env*
+    (async () => {
+      setStatus("loading");
+
+      // Watchdog: evita travar infinito se internet oscilar
+      const watchdog = setTimeout(() => {
+        if (!alive) return;
+        setStatus("error");
+      }, 12000);
+
+      try {
+        const supaMod = await import("@/lib/supabase");
+        const rbacMod = await import("@/lib/rbac");
+        const supabase = supaMod.supabase;
+
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        const user = data.session?.user;
+        if (!user) {
+          // Se não estiver logado, manda pro login (sem travar)
+          window.location.replace("/login");
+          return;
+        }
+
+        if (!alive) return;
+        setEmail(user.email ?? "");
+
+        try {
+          const r = await rbacMod.getMyRole("GRUPO EXECUTIVO SERVICE");
+          if (!alive) return;
+          setRole(r as AppRole);
+        } catch {
+          if (!alive) return;
+          setRole(null);
+        }
+
+        if (!alive) return;
+        setStatus("ready");
+      } catch (e) {
+        console.error("ProtectedLayout init error:", e);
+        if (!alive) return;
+        setStatus("error");
+      } finally {
+        clearTimeout(watchdog);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function signOut() {
+    try {
+      const supaMod = await import("@/lib/supabase");
+      await supaMod.supabase.auth.signOut();
+    } catch {}
+
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {}
+
+    window.location.replace("/login");
+  }
+
+  return (
+    <div className={styles.shell}>
+      <aside className={styles.sidebar}>
+        <div className={styles.brand}>
+          <div className={styles.brandTitle}>ERP-GES Premium</div>
+          <div className={styles.brandSub}>Controle. Clareza. Crescimento.</div>
+        </div>
+
+        <nav className={styles.nav}>
+          {nav.map((item) => {
+            const active = pathname?.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`${styles.navLink} ${active ? styles.navLinkActive : ""}`}
+              >
+                <div className={styles.navIcon}>{item.icon}</div>
+                <div className={styles.navText}>
+                  <div className={styles.navTitle}>{item.title}</div>
+                  <div className={styles.navHint}>{item.hint}</div>
+                </div>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className={styles.sidebarFooter}>
+          <div className={styles.pill}>
+            <div className={styles.pillLine}>
+              Usuário: <span className={styles.pillStrong}>{email || "…"}</span>
+            </div>
+            <div className={styles.pillLine}>
+              Papel: <span className={styles.pillStrong}>{role || "…"}</span>
+            </div>
+          </div>
+
+          <button className={styles.btn} onClick={signOut}>
+            Sair
+          </button>
+        </div>
+      </aside>
+
+      <main className={styles.main}>
+        <header className={styles.topbar}>
+          <div className={styles.topTitle}>
+            <div className={styles.h1}>{title}</div>
+            <div className={styles.h2}>{subtitle || "Seu painel de controle premium"}</div>
+          </div>
+
+          <div className={styles.userBox}>
+            <div className={styles.userMeta}>
+              <div className={styles.userEmail}>{email || "…"}</div>
+              <div className={styles.userRole}>
+                {status === "loading" ? "Sincronizando…" : status === "error" ? "Modo instável" : role || "sem papel"}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section className={styles.content}>
+          {status === "error" ? (
+            <div className={styles.card} style={{ gridColumn: "span 12" }}>
+              <div className={styles.cardTitle}>Conexão instável</div>
+              <div className={styles.cardValue} style={{ fontSize: 16 }}>
+                Não consegui carregar sessão/role agora.
+              </div>
+              <div className={styles.cardHint}>
+                Dica: recarregue a página (Ctrl+R). Se persistir, verifique sua internet.
+              </div>
+            </div>
+          ) : (
+            children
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}# env
+.env
+.env.local
+.env.*.local
+
+# next / build
+.next
+out
+
+# deps
+node_modules
 
 # vercel
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-.vercel
+# misc
+.DS_Store

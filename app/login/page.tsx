@@ -1,89 +1,79 @@
 ﻿"use client";
 
 import { useState } from "react";
-import { supabase, supabaseOrThrow } from "@/lib/supabase";
+import { useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next") || "/app";
+
+  const [email, setEmail] = useState("ricardogrupoexecutivo1@gmail.com");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string>("");
+  const [msg, setMsg] = useState<string | null>(null);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
-    setMsg("");
-
-    if (!email || !password) {
-      setMsg("Informe email e senha.");
-      return;
-    }
-
     setLoading(true);
+    setMsg(null);
+
     try {
-      const sb = supabaseOrThrow();
-      const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      window.location.href = "/app";
+      const supabase = createClient();
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+
+      // Full reload = garante que o SSR vai ler cookie certinho
+      window.location.assign(next);
     } catch (err: any) {
-      setMsg(err?.message ?? "Erro ao entrar.");
+      setMsg(err?.message ?? "Erro ao fazer login.");
     } finally {
       setLoading(false);
     }
   }
 
-  if (!supabase) {
-    return (
-      <div style={{ maxWidth: 420, margin: "60px auto", padding: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Entrar</h1>
-        <p style={{ color: "crimson", fontWeight: 600, marginTop: 10 }}>
-          Supabase não configurado.
-        </p>
-        <p style={{ marginTop: 6 }}>
-          Configure <b>NEXT_PUBLIC_SUPABASE_URL</b> e <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> na Vercel e faça Redeploy.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ maxWidth: 420, margin: "60px auto", padding: 20 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Entrar</h1>
+    <div style={{ padding: 24, maxWidth: 420 }}>
+      <h1 style={{ marginTop: 0 }}>Login</h1>
 
-      <form onSubmit={onLogin} style={{ marginTop: 16, display: "grid", gap: 10 }}>
+      <form onSubmit={onLogin} style={{ display: "grid", gap: 12 }}>
         <label style={{ display: "grid", gap: 6 }}>
-          Email
+          <span>Email</span>
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            type="email"
             autoComplete="email"
-            style={{ padding: 10, borderRadius: 10, border: "1px solid #ccc" }}
+            style={{ padding: 10 }}
           />
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
-          Senha
+          <span>Senha</span>
           <input
+            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            type="password"
             autoComplete="current-password"
-            style={{ padding: 10, borderRadius: 10, border: "1px solid #ccc" }}
+            style={{ padding: 10 }}
           />
         </label>
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{ padding: 12, borderRadius: 10, border: "1px solid #000", cursor: "pointer" }}
-        >
+        <button type="submit" disabled={loading} style={{ padding: 10 }}>
           {loading ? "Entrando..." : "Entrar"}
         </button>
 
-        {msg ? <p style={{ marginTop: 6 }}>{msg}</p> : null}
+        {msg ? (
+          <div style={{ padding: 10, border: "1px solid #ddd" }}>{msg}</div>
+        ) : null}
       </form>
     </div>
   );
 }
-
-

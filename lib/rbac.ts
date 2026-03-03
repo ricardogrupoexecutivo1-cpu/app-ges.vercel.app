@@ -1,33 +1,21 @@
-import { supabase } from "@/lib/supabase";
+export type Role = 'admin' | 'ops' | 'finance' | 'member' | string | null | undefined
 
-export type AppRole = "admin" | "finance" | "ops";
+export function isAdmin(role: Role) {
+  return role === 'admin'
+}
 
-/**
- * companyName é opcional.
- * Mantemos o parâmetro para não quebrar chamadas antigas.
- */
-export async function getMyRole(
-  _companyName?: string
-): Promise<AppRole | null> {
-  if (!supabase) return null;
+export function isOps(role: Role) {
+  return role === 'ops'
+}
 
-  // 1) Usuário logado
-  const { data: userRes, error: userError } = await supabase.auth.getUser();
-  if (userError || !userRes.user?.id) return null;
+export function isFinance(role: Role) {
+  return role === 'finance'
+}
 
-  const userId = userRes.user.id;
+export function canAccessOps(role: Role) {
+  return role === 'admin' || role === 'ops'
+}
 
-  // 2) Buscar role direto no profiles
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userId)
-    .single();
-
-  if (error || !data) {
-    console.error("Erro ao buscar role:", error);
-    return null;
-  }
-
-  return data.role as AppRole;
+export function canAccessFinance(role: Role) {
+  return role === 'admin' || role === 'finance'
 }

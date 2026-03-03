@@ -2,292 +2,425 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { supabase, supabaseOrThrow } from "@/lib/supabase";
-import { getMyRole, AppRole } from "@/lib/rbac";
+import { createClient } from "@supabase/supabase-js";
 
-type Client = { id: string; name: string };
+type ClientRow = { id: string; name: string };
+
 type DebitNoteRow = {
   id: string;
-  number_seq: number;
-  issue_date: string;
-  due_date: string;
-  client_id: string;
+  number_seq?: number | null;
+  issue_date?: string | null;
+  due_date?: string | null;
+  notes?: string | null;
+  status?: string | null;
+  created_at?: string | null;
 };
 
+function getSupabaseBrowser() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
+  if (!anon) throw new Error("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  return createClient(url, anon);
+}
+
+function money(n: number) {
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 export default function DebitNotesPage() {
-  const companyName = "GRUPO EXECUTIVO SERVICE";
-
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<AppRole | null>(null);
-
-  const [clients, setClients] = useState<Client[]>([]);
-  const [notes, setNotes] = useState<DebitNoteRow[]>([]);
+  const supabase = useMemo(() => getSupabaseBrowser(), []);
 
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string>("");
+  const [companyId, setCompanyId] = useState<string | null>(null);
+
+  const [clients, setClients] = useState<ClientRow[]>([]);
+  const [notes, setNotes] = useState<DebitNoteRow[]>([]);
 
   const [clientId, setClientId] = useState("");
-  const [issueDate, setIssueDate] = useState<string>("");
-  const [noteText, setNoteText] = useState<string>("");
+  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [status, setStatus] = useState("OPEN");
+  const [noteText, setNoteText] = useState("");
 
-  const [itemDesc, setItemDesc] = useState("Serviço");
-  const [itemQty, setItemQty] = useState("1");
-  const [itemUnit, setItemUnit] = useState("0");
+  const [itemDesc, setItemDesc] = useState("");
+  const [qty, setQty] = useState<number>(1);
+  const [unitPrice, setUnitPrice] = useState<number>(0);
 
-  const allowed = role === "admin" || role === "finance";
+  const itemTotal = useMemo(() => Number(qty || 0) * Number(unitPrice || 0), [qty, unitPrice]);
 
-  useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
+  const [msg, setMsg] = useState<string | null>(null);
 
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session?.user) {
-        window.location.href = "/login";
+  async function loadAll() {
+    setMsg(null);
+    setLoading(true);
+    try {
+      // 1) user
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const user = userRes.user;
+      if (!user) {
+        setCompanyId(null);
+        setClients([]);
+        setNotes([]);
+        setMsg("Faça login para acessar as Notas de Débito.");
         return;
       }
 
-      setEmail(data.session.user.email ?? "");
+      // 2) company_id do profile
+      const { data: profile, error: profileErr } = await supabase
+        .from("profiles")
+        .select("company_id")
+        .eq("id", user.id)
+        .single();
 
-      const r = await getMyRole(companyName);
-      setRole(r);
+      if (profileErr) throw profileErr;
+      if (!profile?.company_id) {
+        setMsg("Profile sem company_id. Verifique a tabela profiles.");
+        return;
+      }
 
-      const { data: cData } = await supabase
+      const cid = profile.company_id as string;
+      setCompanyId(cid);
+
+      // 3) clients
+      const { data: cdata, error: cerr } = await supabase
         .from("clients")
         .select("id,name")
-        .eq("active", true)
-        .order("name");
+        .order("name", { ascending: true })
+        .limit(2000);
 
-      setClients((cData ?? []) as Client[]);
+      if (cerr) throw cerr;
+      setClients((cdata ?? []) as ClientRow[]);
 
-      await refreshNotes();
+      // 4) debit_notes (tenta filtrar por company_id; se o nome for diferente, fazemos fallback)
+      const list1 = await supabase
+        .from("debit_notes")
+        .select("id,number_seq,issue_date,due_date,notes,status,created_at")
+        .eq("company_id", cid)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (!list1.error) {
+        setNotes((list1.data ?? []) as DebitNoteRow[]);
+        return;
+      }
+
+      // fallback: company_is
+      const list2 = await supabase
+        .from("debit_notes")
+        .select("id,number_seq,issue_date,due_date,notes,status,created_at")
+        .eq("company_is", cid as any)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (list2.error) throw list2.error;
+      setNotes((list2.data ?? []) as DebitNoteRow[]);
+    } catch (e: any) {
+      setMsg(e?.message ?? "Erro ao carregar dados.");
+    } finally {
       setLoading(false);
-    })();
+    }
+  }
+
+  useEffect(() => {
+    loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function refreshNotes() {
-    const sb = supabaseOrThrow();
-    const { data: dn, error } = await sb
-      .from("debit_notes")
-      .select("id,number_seq,issue_date,due_date,client_id")
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (error) {
-      setNotes([]);
-      return;
-    }
-    setNotes((dn ?? []) as DebitNoteRow[]);
-  }
-
-  const clientNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    clients.forEach((c) => m.set(c.id, c.name));
-    return m;
-  }, [clients]);
-
   async function createDebitNote() {
-    setMsg("");
+    setMsg(null);
 
-    if (!allowed) return setMsg("❌ Acesso negado (somente admin/finance).");
-    if (!clientId) return setMsg("❌ Selecione um cliente.");
+    if (!companyId) return setMsg("Sem company_id.");
+    if (!clientId) return setMsg("Selecione um cliente.");
+    if (!itemDesc.trim()) return setMsg("Descreva o item.");
+    if (!qty || qty <= 0) return setMsg("Quantidade inválida.");
+    if (unitPrice < 0) return setMsg("Valor unitário inválido.");
 
-    const qty = Number(itemQty);
-    const unit = Number(itemUnit);
-    if (!itemDesc || !Number.isFinite(qty) || !Number.isFinite(unit)) return setMsg("❌ Item inválido.");
-
-    setBusy(true);
+    setLoading(true);
     try {
-      const sb = supabaseOrThrow();
+      // 1) criar nota (tenta company_id/client_id; se falhar, tenta company_is/client_is)
+      const payloadA: any = {
+        company_id: companyId,
+        client_id: clientId,
+        issue_date: issueDate,
+        due_date: dueDate,
+        notes: noteText || null,
+        status,
+      };
 
-      const items = [{ description: itemDesc, qty, unit_price: unit }];
+      let noteId: string | null = null;
 
-      const { error } = await sb.rpc("create_debit_note", {
-        p_company_name: companyName,
-        p_client_id: clientId,
-        p_issue_date: issueDate ? issueDate : null,
-        p_notes: noteText || null,
-        p_items: items,
-      });
+      const insA = await supabase.from("debit_notes").insert(payloadA).select("id").single();
+      if (!insA.error) {
+        noteId = insA.data?.id ?? null;
+      } else {
+        const payloadB: any = {
+          company_is: companyId,
+          client_is: clientId,
+          issue_date: issueDate,
+          due_date: dueDate,
+          notes: noteText || null,
+          status,
+        };
 
-      if (error) throw error;
+        const insB = await supabase.from("debit_notes").insert(payloadB).select("id").single();
+        if (insB.error) throw insB.error;
+        noteId = insB.data?.id ?? null;
+      }
 
-      setMsg("✅ Nota criada com sucesso.");
+      if (!noteId) throw new Error("Não consegui obter o id da nota criada.");
+
+      // 2) criar 1 item
+      const itemPayloadA: any = {
+        debit_note_id: noteId,
+        description: itemDesc,
+        qty,
+        unit_price: unitPrice,
+        total: itemTotal,
+      };
+
+      const itemInsA = await supabase.from("debit_note_items").insert(itemPayloadA);
+      if (itemInsA.error) {
+        // fallback caso a coluna tenha typo (debit_note_is)
+        const itemPayloadB: any = {
+          debit_note_is: noteId,
+          description: itemDesc,
+          qty,
+          unit_price: unitPrice,
+          total: itemTotal,
+        };
+        const itemInsB = await supabase.from("debit_note_items").insert(itemPayloadB);
+        if (itemInsB.error) throw itemInsB.error;
+      }
+
+      setMsg("Nota de débito criada com sucesso ✅");
+      // reset item
+      setItemDesc("");
+      setQty(1);
+      setUnitPrice(0);
       setNoteText("");
-      setItemDesc("Serviço");
-      setItemQty("1");
-      setItemUnit("0");
 
-      await refreshNotes();
+      await loadAll();
     } catch (e: any) {
-      setMsg(`❌ ${e?.message ?? "Erro ao criar nota"}`);
+      setMsg(e?.message ?? "Erro ao criar nota.");
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
-  }
-
-  if (!supabase) {
-    return (
-      <div style={{ padding: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Notas de Débito</h1>
-        <p style={{ color: "crimson", fontWeight: 600, marginTop: 10 }}>Supabase não configurado.</p>
-        <p style={{ marginTop: 6 }}>
-          Configure <b>NEXT_PUBLIC_SUPABASE_URL</b> e <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> na Vercel e faça Redeploy.
-        </p>
-      </div>
-    );
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Notas de Débito</h1>
-
-      <p style={{ marginTop: 8 }}>
-        Usuário: <b>{email || "carregando..."}</b> • Papel: <b>{role || "carregando..."}</b>
-      </p>
-
-      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Link href="/finance" style={{ textDecoration: "none", padding: 10, border: "1px solid #000", borderRadius: 10 }}>
+    <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <h1 style={{ margin: 0 }}>Financeiro • Notas de Débito</h1>
+        <Link href="/finance" style={{ textDecoration: "underline" }}>
           Voltar
         </Link>
-        <Link
-          href="/finance/ar-by-client"
-          style={{ textDecoration: "none", padding: 10, border: "1px solid #000", borderRadius: 10 }}
+      </header>
+
+      {msg ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            border: "1px solid rgba(0,0,0,0.12)",
+            borderRadius: 12,
+          }}
         >
-          A Receber por Cliente
-        </Link>
-      </div>
-
-      {!allowed ? (
-        <div style={{ marginTop: 18, padding: 12, border: "1px solid #f00", borderRadius: 10 }}>
-          <b>ACESSO NEGADO.</b>
-          <p style={{ marginTop: 8 }}>Somente admin/finance pode criar e ver notas.</p>
+          {msg}
         </div>
-      ) : loading ? (
-        <p style={{ marginTop: 16 }}>Carregando…</p>
-      ) : (
-        <>
-          <div style={{ marginTop: 18, padding: 12, border: "1px solid #ccc", borderRadius: 10, maxWidth: 720 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>Criar nova nota</h2>
+      ) : null}
 
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              <label>
-                Cliente
-                <select
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc", marginTop: 6 }}
-                >
-                  <option value="">Selecione...</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+      <section
+        style={{
+          marginTop: 12,
+          padding: 16,
+          border: "1px solid rgba(0,0,0,0.12)",
+          borderRadius: 12,
+        }}
+      >
+        <h2 style={{ marginTop: 0 }}>Criar nova nota</h2>
 
-              <label>
-                Data de emissão (opcional)
-                <input
-                  type="date"
-                  value={issueDate}
-                  onChange={(e) => setIssueDate(e.target.value)}
-                  style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc", marginTop: 6 }}
-                />
-              </label>
-
-              <label>
-                Observações (opcional)
-                <textarea
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc", marginTop: 6 }}
-                />
-              </label>
-
-              <div style={{ marginTop: 6, padding: 10, border: "1px dashed #aaa", borderRadius: 10 }}>
-                <b>Item 1</b>
-                <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                  <input
-                    value={itemDesc}
-                    onChange={(e) => setItemDesc(e.target.value)}
-                    placeholder="Descrição"
-                    style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
-                  />
-                  <input
-                    value={itemQty}
-                    onChange={(e) => setItemQty(e.target.value)}
-                    placeholder="Qtd"
-                    style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
-                  />
-                  <input
-                    value={itemUnit}
-                    onChange={(e) => setItemUnit(e.target.value)}
-                    placeholder="Valor unitário"
-                    style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
-                  />
-                </div>
-              </div>
-
-              <button
-                disabled={busy}
-                onClick={createDebitNote}
-                style={{ padding: 12, borderRadius: 10, border: "1px solid #000", cursor: "pointer" }}
-              >
-                {busy ? "Criando..." : "Criar Nota de Débito"}
-              </button>
-
-              {msg && <p>{msg}</p>}
-            </div>
-          </div>
-
-          <div style={{ marginTop: 18 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>Últimas notas</h2>
-
-            <div style={{ marginTop: 10, border: "1px solid #ddd", borderRadius: 10, overflow: "hidden" }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "120px 160px 160px 1fr",
-                  padding: 10,
-                  fontWeight: 700,
-                  background: "#f7f7f7",
-                }}
-              >
-                <div>Número</div>
-                <div>Emissão</div>
-                <div>Vencimento</div>
-                <div>Cliente</div>
-              </div>
-
-              {notes.map((n) => (
-                <div
-                  key={n.id}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "120px 160px 160px 1fr",
-                    padding: 10,
-                    borderTop: "1px solid #eee",
-                  }}
-                >
-                  <div>#{n.number_seq}</div>
-                  <div>{n.issue_date}</div>
-                  <div>{n.due_date}</div>
-                  <div>{clientNameById.get(n.client_id) ?? n.client_id}</div>
-                </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <label>Cliente</label>
+            <select
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              style={{ width: "100%", padding: 10, marginTop: 6 }}
+              disabled={loading}
+            >
+              <option value="">Selecione…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
               ))}
+            </select>
+          </div>
 
-              {notes.length === 0 && <div style={{ padding: 10, opacity: 0.8 }}>Nenhuma nota ainda.</div>}
+          <div>
+            <label>Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              style={{ width: "100%", padding: 10, marginTop: 6 }}
+              disabled={loading}
+            >
+              <option value="OPEN">OPEN</option>
+              <option value="PAID">PAID</option>
+              <option value="CANCELED">CANCELED</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Data de emissão</label>
+            <input
+              type="date"
+              value={issueDate}
+              onChange={(e) => setIssueDate(e.target.value)}
+              style={{ width: "100%", padding: 10, marginTop: 6 }}
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label>Vencimento</label>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              style={{ width: "100%", padding: 10, marginTop: 6 }}
+              disabled={loading}
+            />
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <label>Observações</label>
+          <textarea
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            style={{ width: "100%", padding: 10, marginTop: 6, minHeight: 70 }}
+            disabled={loading}
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            border: "1px dashed rgba(0,0,0,0.25)",
+            borderRadius: 12,
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>Item (1 por enquanto)</h3>
+
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 12 }}>
+            <div>
+              <label>Descrição</label>
+              <input
+                value={itemDesc}
+                onChange={(e) => setItemDesc(e.target.value)}
+                style={{ width: "100%", padding: 10, marginTop: 6 }}
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <label>Qtd</label>
+              <input
+                type="number"
+                value={qty}
+                onChange={(e) => setQty(Number(e.target.value))}
+                style={{ width: "100%", padding: 10, marginTop: 6 }}
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <label>Valor unit.</label>
+              <input
+                type="number"
+                step="0.01"
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(Number(e.target.value))}
+                style={{ width: "100%", padding: 10, marginTop: 6 }}
+                disabled={loading}
+              />
             </div>
           </div>
-        </>
-      )}
-    </div>
+
+          <div style={{ marginTop: 10, opacity: 0.85 }}>
+            Total do item: <b>{money(itemTotal)}</b>
+          </div>
+        </div>
+
+        <button
+          onClick={createDebitNote}
+          disabled={loading}
+          style={{ marginTop: 12, padding: "10px 14px", cursor: "pointer" }}
+        >
+          {loading ? "Processando..." : "Criar nota"}
+        </button>
+      </section>
+
+      <section
+        style={{
+          marginTop: 12,
+          border: "1px solid rgba(0,0,0,0.12)",
+          borderRadius: 12,
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.12)" }}>
+          <b>Últimas notas</b>
+          {companyId ? (
+            <span style={{ marginLeft: 10, opacity: 0.75, fontSize: 12 }}>
+              company_id: {companyId}
+            </span>
+          ) : null}
+        </div>
+
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ textAlign: "left" }}>
+              <th style={th}>Número</th>
+              <th style={th}>Emissão</th>
+              <th style={th}>Vencimento</th>
+              <th style={th}>Status</th>
+              <th style={th}>Notas</th>
+            </tr>
+          </thead>
+          <tbody>
+            {notes.length === 0 ? (
+              <tr>
+                <td style={{ padding: 12 }} colSpan={5}>
+                  {loading ? "Carregando..." : "Nenhuma nota encontrada."}
+                </td>
+              </tr>
+            ) : (
+              notes.map((n) => (
+                <tr key={n.id}>
+                  <td style={td}>{n.number_seq ?? "-"}</td>
+                  <td style={td}>{n.issue_date ?? "-"}</td>
+                  <td style={td}>{n.due_date ?? "-"}</td>
+                  <td style={td}>{n.status ?? "-"}</td>
+                  <td style={td}>{n.notes ?? ""}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </section>
+    </main>
   );
 }
 
+const th: React.CSSProperties = {
+  padding: 12,
+  borderBottom: "1px solid rgba(0,0,0,0.12)",
+};
+
+const td: React.CSSProperties = {
+  padding: 12,
+  borderBottom: "1px solid rgba(0,0,0,0.06)",
+};
