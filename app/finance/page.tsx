@@ -1,15 +1,11 @@
 ﻿import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { safeGetUser } from "@/lib/supabase/server";
 
 export default async function FinancePage() {
-  const supabase = await createClient();
+  const user = await safeGetUser();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
+  if (!user) redirect("/login?next=/finance");
 
   return (
     <div style={{ padding: 24 }}>

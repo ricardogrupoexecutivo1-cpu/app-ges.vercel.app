@@ -31,6 +31,61 @@ function isoToday() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function clearSupabaseBrowserSession() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("sb-")) localStorage.removeItem(k);
+    }
+  } catch {}
+
+  try {
+    document.cookie.split(";").forEach((c) => {
+      const name = c.split("=")[0]?.trim();
+      if (name && name.startsWith("sb-")) {
+        document.cookie = `${name}=; Max-Age=0; path=/`;
+      }
+    });
+  } catch {}
+}
+
+async function requireSessionOrRedirect(nextPath: string) {
+  const supaMod = await import("@/lib/supabase");
+  const supabase = supaMod.supabase;
+
+  try {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error && (error as any).code === "refresh_token_not_found") {
+      clearSupabaseBrowserSession();
+      try {
+        await supabase.auth.signOut();
+      } catch {}
+      window.location.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+      return { supabase, user: null as any, redirected: true };
+    }
+
+    const user = data.session?.user ?? null;
+
+    if (!user) {
+      window.location.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+      return { supabase, user: null as any, redirected: true };
+    }
+
+    return { supabase, user, redirected: false };
+  } catch (e: any) {
+    if (e?.code === "refresh_token_not_found") {
+      clearSupabaseBrowserSession();
+      try {
+        await supabase.auth.signOut();
+      } catch {}
+      window.location.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+      return { supabase, user: null as any, redirected: true };
+    }
+    throw e;
+  }
+}
+
 export default function PersonalPage() {
   const [email, setEmail] = useState("");
   const [tx, setTx] = useState<Tx[]>([]);
@@ -48,15 +103,8 @@ export default function PersonalPage() {
     setMsg("");
 
     try {
-      const supaMod = await import("@/lib/supabase");
-      const supabase = supaMod.supabase;
-
-      const { data } = await supabase.auth.getSession();
-      const user = data.session?.user;
-      if (!user) {
-        window.location.replace("/login");
-        return;
-      }
+      const { supabase, user, redirected } = await requireSessionOrRedirect("/personal");
+      if (redirected) return;
 
       setEmail(user.email ?? "");
 
@@ -106,15 +154,8 @@ export default function PersonalPage() {
     setSaving(true);
 
     try {
-      const supaMod = await import("@/lib/supabase");
-      const supabase = supaMod.supabase;
-
-      const { data } = await supabase.auth.getSession();
-      const user = data.session?.user;
-      if (!user) {
-        window.location.replace("/login");
-        return;
-      }
+      const { supabase, user, redirected } = await requireSessionOrRedirect("/personal");
+      if (redirected) return;
 
       const payload = {
         user_id: user.id,
@@ -188,7 +229,15 @@ export default function PersonalPage() {
             Uso: <b>{used}</b>/{FREE_LIMIT} lançamentos • Restam: <b>{remaining}</b>
           </div>
 
-          <div style={{ marginTop: 10, height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+          <div
+            style={{
+              marginTop: 10,
+              height: 10,
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.08)",
+              overflow: "hidden",
+            }}
+          >
             <div
               style={{
                 height: "100%",
@@ -206,9 +255,7 @@ export default function PersonalPage() {
               </Link>
             </div>
           ) : (
-            <div style={{ marginTop: 10, opacity: 0.9 }}>
-              Dica: no PRO você libera lançamentos ilimitados + relatórios.
-            </div>
+            <div style={{ marginTop: 10, opacity: 0.9 }}>Dica: no PRO você libera lançamentos ilimitados + relatórios.</div>
           )}
         </div>
       </div>
@@ -238,7 +285,15 @@ export default function PersonalPage() {
         </div>
 
         {blocked ? (
-          <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: "1px solid rgba(255,0,0,0.35)", background: "rgba(255,0,0,0.08)" }}>
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 14,
+              border: "1px solid rgba(255,0,0,0.35)",
+              background: "rgba(255,0,0,0.08)",
+            }}
+          >
             <b>⭐ Plano FREE atingiu o limite.</b>
             <div style={{ marginTop: 6 }}>
               Para continuar lançando, faça upgrade em{" "}
@@ -334,14 +389,20 @@ export default function PersonalPage() {
           </div>
         </div>
 
-        {msg && <div className={styles.cardHint} style={{ marginTop: 10 }}>{msg}</div>}
+        {msg && (
+          <div className={styles.cardHint} style={{ marginTop: 10 }}>
+            {msg}
+          </div>
+        )}
       </div>
 
       <div className={styles.card} style={{ gridColumn: "span 12" }}>
         <div className={styles.cardTitle}>Últimos lançamentos</div>
 
         {loading ? (
-          <div className={styles.cardHint} style={{ marginTop: 8 }}>Carregando…</div>
+          <div className={styles.cardHint} style={{ marginTop: 8 }}>
+            Carregando…
+          </div>
         ) : tx.length === 0 ? (
           <div className={styles.cardHint} style={{ marginTop: 8 }}>
             Sem lançamentos ainda. Adicione sua primeira receita/despesa acima.

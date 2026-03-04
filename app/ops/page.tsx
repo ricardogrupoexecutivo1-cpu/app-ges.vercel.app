@@ -9,6 +9,26 @@ import { getMyRole, AppRole } from "@/lib/rbac";
 const PLAN: "free" | "pro" | "premium" = "free";
 const FREE_CLIENTS_LIMIT = 3;
 
+function clearSupabaseBrowserSession() {
+  try {
+    // limpa storage do supabase-js (chave sb-...)
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("sb-")) localStorage.removeItem(k);
+    }
+  } catch {}
+
+  try {
+    // tenta limpar cookies sb-... (nem sempre acessível, mas ajuda)
+    document.cookie.split(";").forEach((c) => {
+      const name = c.split("=")[0]?.trim();
+      if (name && name.startsWith("sb-")) {
+        document.cookie = `${name}=; Max-Age=0; path=/`;
+      }
+    });
+  } catch {}
+}
+
 export default function OpsHomePage() {
   const companyName = "GRUPO EXECUTIVO SERVICE";
   const [email, setEmail] = useState<string>("");
@@ -32,16 +52,43 @@ export default function OpsHomePage() {
         setLoading(true);
         setMsg("");
 
-        const { data } = await supabase.auth.getSession();
-        if (!data.session?.user) {
-          window.location.href = "/login";
+        // Sessão (com proteção contra refresh token ausente)
+        let user: any = null;
+
+        try {
+          const { data, error } = await supabase.auth.getSession();
+
+          if (error && (error as any).code === "refresh_token_not_found") {
+            clearSupabaseBrowserSession();
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+            window.location.replace("/login?next=/ops");
+            return;
+          }
+
+          user = data.session?.user ?? null;
+        } catch (e: any) {
+          if (e?.code === "refresh_token_not_found") {
+            clearSupabaseBrowserSession();
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+            window.location.replace("/login?next=/ops");
+            return;
+          }
+          throw e;
+        }
+
+        if (!user) {
+          window.location.replace("/login?next=/ops");
           return;
         }
 
         if (!alive) return;
-        setEmail(data.session.user.email ?? "");
+        setEmail(user.email ?? "");
 
-        const r = await getMyRole(companyName);
+        const r = await getMyRole();
         if (!alive) return;
         setRole(r);
 
@@ -85,8 +132,7 @@ export default function OpsHomePage() {
           Supabase não configurado.
         </p>
         <p style={{ marginTop: 6 }}>
-          Configure <b>NEXT_PUBLIC_SUPABASE_URL</b> e{" "}
-          <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> na Vercel e faça Redeploy.
+          Configure <b>NEXT_PUBLIC_SUPABASE_URL</b> e <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> na Vercel e faça Redeploy.
         </p>
       </div>
     );

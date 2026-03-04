@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 type ARRow = {
   id: string;
@@ -28,6 +28,24 @@ function startOfToday() {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
+function clearSupabaseBrowserSession() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("sb-")) localStorage.removeItem(k);
+    }
+  } catch {}
+
+  try {
+    document.cookie.split(";").forEach((c) => {
+      const name = c.split("=")[0]?.trim();
+      if (name && name.startsWith("sb-")) {
+        document.cookie = `${name}=; Max-Age=0; path=/`;
+      }
+    });
+  } catch {}
+}
+
 export default function GlobalAlerts() {
   const [rows, setRows] = useState<ARRow[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -48,12 +66,40 @@ export default function GlobalAlerts() {
         const supabase = supaMod.supabase;
 
         // Se não tiver sessão, não mostra alerta
-        const { data } = await supabase.auth.getSession();
-        if (!data.session?.user) {
-          if (!alive) return;
-          setRows([]);
-          setStatus("ready");
-          return;
+        try {
+          const { data, error } = await supabase.auth.getSession();
+
+          if (error && (error as any).code === "refresh_token_not_found") {
+            clearSupabaseBrowserSession();
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+
+            if (!alive) return;
+            setRows([]);
+            setStatus("ready");
+            return;
+          }
+
+          if (!data.session?.user) {
+            if (!alive) return;
+            setRows([]);
+            setStatus("ready");
+            return;
+          }
+        } catch (e: any) {
+          if (e?.code === "refresh_token_not_found") {
+            clearSupabaseBrowserSession();
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+
+            if (!alive) return;
+            setRows([]);
+            setStatus("ready");
+            return;
+          }
+          throw e;
         }
 
         // Buscar só o que interessa (to_do) para alertas

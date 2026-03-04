@@ -22,6 +22,24 @@ function cls(...xs: Array<string | false | undefined | null>) {
   return xs.filter(Boolean).join(" ");
 }
 
+function clearSupabaseBrowserSession() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("sb-")) localStorage.removeItem(k);
+    }
+  } catch {}
+
+  try {
+    document.cookie.split(";").forEach((c) => {
+      const name = c.split("=")[0]?.trim();
+      if (name && name.startsWith("sb-")) {
+        document.cookie = `${name}=; Max-Age=0; path=/`;
+      }
+    });
+  } catch {}
+}
+
 export default function ProtectedLayout({
   children,
   title = "ERP-GES Premium",
@@ -59,9 +77,45 @@ export default function ProtectedLayout({
       try {
         const supabase = createClient();
 
-        // 1) Session
-        const { data } = await supabase.auth.getSession();
-        const user = data.session?.user;
+        // 1) Session (com proteção contra refresh token ausente)
+        let user: any = null;
+
+        try {
+          const { data, error } = await supabase.auth.getSession();
+
+          if (error && (error as any).code === "refresh_token_not_found") {
+            clearSupabaseBrowserSession();
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+
+            if (!alive) return;
+            setEmail("");
+            setRole(null);
+
+            const next = encodeURIComponent(pathname || "/app");
+            window.location.assign(`/login?next=${next}`);
+            return;
+          }
+
+          user = data.session?.user ?? null;
+        } catch (e: any) {
+          if (e?.code === "refresh_token_not_found") {
+            clearSupabaseBrowserSession();
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+
+            if (!alive) return;
+            setEmail("");
+            setRole(null);
+
+            const next = encodeURIComponent(pathname || "/app");
+            window.location.assign(`/login?next=${next}`);
+            return;
+          }
+          throw e;
+        }
 
         if (!alive) return;
         setEmail(user?.email ?? "");
@@ -74,7 +128,7 @@ export default function ProtectedLayout({
         // 2) Tenta RBAC primeiro (se existir)
         try {
           const rbacMod = await import("@/lib/rbac");
-          const r = await rbacMod.getMyRole(companyName);
+          const r = await rbacMod.getMyRole();
           if (!alive) return;
           if (r) {
             setRole(r as any);
@@ -109,13 +163,14 @@ export default function ProtectedLayout({
     return () => {
       alive = false;
     };
-  }, [companyName]);
+  }, [companyName, pathname]);
 
   async function onLogout() {
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
     } finally {
+      clearSupabaseBrowserSession();
       window.location.assign("/login");
     }
   }
@@ -130,8 +185,7 @@ export default function ProtectedLayout({
 
         <nav className={styles.nav}>
           {navItems.map((it) => {
-            const active =
-              it.href === "/app" ? pathname === "/app" : pathname?.startsWith(it.href);
+            const active = it.href === "/app" ? pathname === "/app" : pathname?.startsWith(it.href);
 
             const disabled = (it as any).disabled;
 
@@ -153,11 +207,7 @@ export default function ProtectedLayout({
             }
 
             return (
-              <Link
-                key={it.href}
-                href={it.href}
-                className={cls(styles.navLink, active && styles.navLinkActive)}
-              >
+              <Link key={it.href} href={it.href} className={cls(styles.navLink, active && styles.navLinkActive)}>
                 <div className={styles.navIcon}>{it.icon}</div>
                 <div className={styles.navText}>
                   <div className={styles.navTitle}>{it.title}</div>
@@ -187,9 +237,7 @@ export default function ProtectedLayout({
 
           {!allowedFinance && (
             <div className={styles.pill} style={{ opacity: 0.8 }}>
-              <div className={styles.pillLine}>
-                * Financeiro fica bloqueado para perfil operacional.
-              </div>
+              <div className={styles.pillLine}>* Financeiro fica bloqueado para perfil operacional.</div>
             </div>
           )}
         </div>

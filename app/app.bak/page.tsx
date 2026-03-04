@@ -171,7 +171,7 @@ export default function DashboardPage() {
         // 2) Role (RBAC -> fallback profiles.role)
         try {
           const rbacMod = await import("@/lib/rbac");
-          const r = await rbacMod.getMyRole(COMPANY_NAME);
+          const r = await rbacMod.getMyRole();;
 
           if (!alive) return;
 

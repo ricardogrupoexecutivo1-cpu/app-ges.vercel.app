@@ -1,62 +1,66 @@
+import "server-only";
+import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import { cookies, headers } from "next/headers";
 
-type CookieItem = { name: string; value: string };
+export function createClient() {
+  const cookieStore = cookies();
 
-function parseCookieHeader(cookieHeader: string): CookieItem[] {
-  if (!cookieHeader) return [];
-  return cookieHeader
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((kv) => {
-      const eq = kv.indexOf("=");
-      if (eq === -1) return { name: kv, value: "" };
-      return { name: kv.slice(0, eq).trim(), value: kv.slice(eq + 1).trim() };
-    });
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Em alguns contextos não dá pra setar cookie; não pode derrubar a página.
+        }
+      },
+    },
+  });
+
+  return supabase;
 }
 
-export async function createClient() {
-  // Next 16: these dynamic APIs are async
-  const cookieStore: any = await cookies();
-  const headerStore: any = await headers();
-
-  const getAllCookies = (): CookieItem[] => {
-    if (cookieStore && typeof cookieStore.getAll === "function") {
-      const list = cookieStore.getAll();
-      return (list ?? []).map((c: any) => ({ name: c.name, value: c.value }));
+function clearBrokenSbCookies() {
+  const cookieStore = cookies();
+  for (const c of cookieStore.getAll()) {
+    if (c.name.startsWith("sb-")) {
+      cookieStore.set(c.name, "", { path: "/", maxAge: 0 });
     }
+  }
+}
 
-    // fallback: parse Cookie header
-    const cookieHeader =
-      (headerStore && typeof headerStore.get === "function"
-        ? headerStore.get("cookie")
-        : "") ?? "";
-
-    return parseCookieHeader(cookieHeader);
-  };
-
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return getAllCookies();
-        },
-        setAll(cookiesToSet) {
-          // In Server Components this may not be writable; keep safe.
-          try {
-            if (cookieStore && typeof cookieStore.set === "function") {
-              cookiesToSet.forEach(({ name, value, options }) => {
-                cookieStore.set(name, value, options);
-              });
-            }
-          } catch {
-            // ignore
-          }
-        },
-      },
+export async function safeGetUser() {
+  const supabase = createClient();
+  try {
+    const { data } = await supabase.auth.getUser();
+    return data.user ?? null;
+  } catch (e: any) {
+    if (e?.code === "refresh_token_not_found") {
+      clearBrokenSbCookies();
+      return null;
     }
-  );
+    throw e;
+  }
+}
+
+export async function safeGetSession() {
+  const supabase = createClient();
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session ?? null;
+  } catch (e: any) {
+    if (e?.code === "refresh_token_not_found") {
+      clearBrokenSbCookies();
+      return null;
+    }
+    throw e;
+  }
 }

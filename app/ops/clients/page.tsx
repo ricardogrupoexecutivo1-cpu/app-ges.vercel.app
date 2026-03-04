@@ -97,7 +97,9 @@ export default function OpsClientsPage() {
         if (!alive) return;
         setEmail(user.email ?? "");
 
-        const r = await getMyRole(COMPANY_NAME);
+setEmail(user.email ?? "");const r = await getMyRole();
+if (!alive) return;
+setRole(r);;
         if (!alive) return;
         setRole(r);
 
