@@ -1,5 +1,7 @@
 "use client";
 
+import GlobalSearch from "./GlobalSearch";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -250,10 +252,15 @@ export default function ProtectedLayout({
             <div className={styles.h2}>{subtitle}</div>
           </div>
 
-          <div className={styles.userBox}>
-            <div className={styles.userMeta}>
-              <div className={styles.userEmail}>{email || "—"}</div>
-              <div className={styles.userRole}>Papel: {role ?? "carregando..."}</div>
+          {/* 🔎 Busca Global (Ctrl+K) + caixa do usuário */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <GlobalSearch />
+
+            <div className={styles.userBox}>
+              <div className={styles.userMeta}>
+                <div className={styles.userEmail}>{email || "—"}</div>
+                <div className={styles.userRole}>Papel: {role ?? "carregando..."}</div>
+              </div>
             </div>
           </div>
         </div>
