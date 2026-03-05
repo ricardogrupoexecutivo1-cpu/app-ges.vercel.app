@@ -19,8 +19,9 @@ const VERSION = "DASH-MISSION-2026-03-01-02";
 const COMPANY_NAME = "GRUPO EXECUTIVO SERVICE";
 
 // SaaS (enquanto Stripe não está ligado)
-const PLAN: "free" | "pro" | "premium" = "free";
-const FREE_CLIENTS_LIMIT = 3;
+// ✅ liberado para você trabalhar sem travar
+const PLAN: "free" | "pro" | "premium" = "pro";
+const FREE_CLIENTS_LIMIT = 9999;
 
 function fmtBRL(v: number) {
   const n = Number(v || 0);
@@ -171,14 +172,13 @@ export default function DashboardPage() {
         // 2) Role (RBAC -> fallback profiles.role)
         try {
           const rbacMod = await import("@/lib/rbac");
-          const r = await rbacMod.getMyRole();;
+          const r = await rbacMod.getMyRole();
 
           if (!alive) return;
 
           if (r) {
             setRole(r as any);
           } else {
-            // fallback profiles.role
             const { data: prof } = await supabase
               .from("profiles")
               .select("role")
@@ -189,7 +189,6 @@ export default function DashboardPage() {
             setRole((prof?.role ?? null) as any);
           }
         } catch {
-          // fallback profiles.role
           const { data: prof } = await supabase
             .from("profiles")
             .select("role")
